@@ -3,7 +3,7 @@ package com.hex.aicreator.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
-import com.hex.aicreator.enums.UserRoleEnum;
+import com.hex.aicreator.model.enums.UserRoleEnum;
 import com.hex.aicreator.exception.BusinessException;
 import com.hex.aicreator.exception.ErrorCode;
 import com.hex.aicreator.mapper.UserMapper;

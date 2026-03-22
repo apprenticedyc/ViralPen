@@ -123,11 +123,11 @@ public class ArticleState implements Serializable {
         private String sectionTitle;
         private String keywords;
         /**
-         * 图片来源：PEXELS（图库检索）或 NANO_BANANA（AI 生图）
+         * 图片来源：PEXELS（图库检索）或 Seedream（AI 生图）
          */
         private String imageSource;
         /**
-         * AI 生图提示词（当 imageSource 为 NANO_BANANA 时使用）
+         * AI 生图提示词（当 imageSource 为 Seedream 时使用）
          */
         private String prompt;
         /**

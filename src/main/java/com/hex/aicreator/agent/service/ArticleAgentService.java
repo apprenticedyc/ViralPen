@@ -7,12 +7,13 @@ import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import com.hex.aicreator.agent.prompt.PromptTemplate;
-import com.hex.aicreator.enums.ImageMethodEnum;
-import com.hex.aicreator.enums.SseMessageTypeEnum;
+import com.hex.aicreator.model.enums.ImageMethodEnum;
+import com.hex.aicreator.model.enums.SseMessageTypeEnum;
+import com.hex.aicreator.model.dto.image.ImageRequest;
 import com.hex.aicreator.model.state.ArticleState;
+import com.hex.aicreator.service.impl.image.ImageServiceStrategy;
 import com.hex.aicreator.utils.CosService;
 import com.hex.aicreator.utils.GsonUtils;
-import com.hex.aicreator.service.ImageSearchService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -38,7 +39,7 @@ public class ArticleAgentService {
     @Resource
     private DashScopeChatModel chatModel;
     @Resource
-    private ImageSearchService imageSearchService;
+    private ImageServiceStrategy imageServiceStrategy;
     @Resource
     private CosService cosService;
 
@@ -127,87 +128,80 @@ public class ArticleAgentService {
     }
 
     /**
-     * 智能体4：分析配图需求
+     * 智能体4：分析配图需求（在正文中插入占位符）
      */
     private void agent4AnalyzeImageRequirements(ArticleState state) {
-        String prompt = PromptTemplate.AGENT4_IMAGE_REQUIREMENTS_PROMPT.replace("{mainTitle}", state.getTitle()
-                .getMainTitle()).replace("{content}", state.getContent());
+        String prompt = PromptTemplate.AGENT4_IMAGE_REQUIREMENTS_PROMPT
+                .replace("{mainTitle}", state.getTitle().getMainTitle())
+                .replace("{content}", state.getContent());
 
-        String content = call(prompt, new TypeToken<List<ArticleState.ImageRequirement>>() {
-        }.getClass());
-        List<ArticleState.ImageRequirement> imageRequirements = parseJsonListResponse(content, new TypeToken<>() {
-        }, "配图需求");
-        state.setImageRequirements(imageRequirements);
-        log.info("智能体4：配图需求分析成功, count={}", imageRequirements.size());
+        String content = call(prompt, ArticleState.Agent4Result.class);
+        ArticleState.Agent4Result agent4Result = parseJsonResponse(content, ArticleState.Agent4Result.class, "配图需求");
+
+        // 更新正文为包含占位符的版本
+        state.setContent(agent4Result.getContentWithPlaceholders());
+        state.setImageRequirements(agent4Result.getImageRequirements());
+        log.info("智能体4：配图需求分析成功, count={}, 已在正文中插入占位符", agent4Result.getImageRequirements()
+                .size());
     }
 
     /**
-     * 智能体5：生成配图（串行执行）
+     * 智能体5：生成配图（串行执行，支持混用多种配图方式，统一上传到 COS）
      */
     private void agent5GenerateImages(ArticleState state, Consumer<String> streamHandler) {
         List<ArticleState.ImageResult> imageResults = new ArrayList<>();
 
         for (ArticleState.ImageRequirement requirement : state.getImageRequirements()) {
-            log.info("智能体5：开始检索配图, position={}, keywords={}", requirement.getPosition(), requirement.getKeywords());
+            String imageSource = requirement.getImageSource();
+            log.info("智能体5：开始获取配图, position={}, imageSource={}, keywords={}", requirement.getPosition(), imageSource, requirement.getKeywords());
 
-            // 调用图片检索服务
-            String imageUrl = imageSearchService.searchImage(requirement.getKeywords());
+            // 构建图片请求对象
+            ImageRequest imageRequest = ImageRequest.builder().keywords(requirement.getKeywords())
+                    .prompt(requirement.getPrompt()).position(requirement.getPosition()).type(requirement.getType())
+                    .build();
 
-            // 降级策略
-            ImageMethodEnum method = imageSearchService.getMethod();
-            if (imageUrl == null) {
-                imageUrl = imageSearchService.getFallbackImage(requirement.getPosition());
-                method = ImageMethodEnum.PICSUM;
-                log.warn("智能体5：图片检索失败, 使用降级方案, position={}", requirement.getPosition());
-            }
+            // 使用策略模式获取图片并统一上传到 COS
+            ImageServiceStrategy.ImageResult result = imageServiceStrategy.getImageAndUpload(imageSource, imageRequest);
+            String cosUrl = result.getUrl();
+            ImageMethodEnum method = result.getMethod();
 
-            // 使用图片直接 URL（MVP 阶段不上传到 COS，简化流程）
-            String finalImageUrl = cosService.useDirectUrl(imageUrl);
-
-            // 创建配图结果
-            ArticleState.ImageResult imageResult = buildImageResult(requirement, finalImageUrl, method);
+            // 创建配图结果（URL 已经是 COS 地址）
+            ArticleState.ImageResult imageResult = buildImageResult(requirement, cosUrl, method);
             imageResults.add(imageResult);
 
-            // 推送单张配图完成消息
+            // 推送单张配图完成
             String imageCompleteMessage = SseMessageTypeEnum.IMAGE_COMPLETE.getStreamingPrefix() + GsonUtils.toJson(imageResult);
             streamHandler.accept(imageCompleteMessage);
 
-            log.info("智能体5：配图检索成功, position={}, method={}", requirement.getPosition(), method.getValue());
+            log.info("智能体5：配图获取并上传成功, position={}, method={}, cosUrl={}", requirement.getPosition(), method.getValue(), cosUrl);
         }
 
         state.setImages(imageResults);
-        log.info("智能体5：所有配图生成完成, count={}", imageResults.size());
+        log.info("智能体5：所有配图生成并上传完成, count={}", imageResults.size());
     }
 
     /**
-     * 图文合成：将配图插入正文对应位置
+     * 图文合成：根据占位符将配图插入正文
      */
     private void mergeImagesIntoContent(ArticleState state) {
-        // 正文内容
         String content = state.getContent();
         List<ArticleState.ImageResult> images = state.getImages();
-        // 没图片直接返回正文
         if (images == null || images.isEmpty()) {
             state.setFullContent(content);
             return;
         }
+        String fullContent = content;
 
-        StringBuilder fullContent = new StringBuilder();
-
-        // "逐行"扫描正文，在章节标题后插入对应图片
-        String[] lines = content.split("\n");
-        for (String line : lines) {
-            fullContent.append(line).append("\n");
-            // 检查是否是章节标题（以 ## 开头）
-            if (line.startsWith("## ")) {
-                // 截取章节标题
-                String sectionTitle = line.substring(3).trim();
-                // 将图片插在章节后面
-                insertImageAfterSection(fullContent, images, sectionTitle);
+        // 遍历所有配图，根据占位符替换为实际图片
+        for (ArticleState.ImageResult image : images) {
+            String placeholder = image.getPlaceholderId();
+            if (placeholder != null && !placeholder.isEmpty()) {
+                String imageMarkdown = "![" + image.getDescription() + "](" + image.getUrl() + ")";
+                fullContent = fullContent.replace(placeholder, imageMarkdown);
             }
         }
-        state.setFullContent(fullContent.toString());
-        log.info("图文融合完成, fullContentLength={}", fullContent.length());
+        state.setFullContent(fullContent);
+        log.info("图文合成完成, fullContentLength={}", fullContent.length());
     }
 
 
@@ -217,21 +211,16 @@ public class ArticleAgentService {
      * 调用 LLM（非流式）
      */
     private String call(String prompt, Class clz) {
-        DashScopeChatOptions options = DashScopeChatOptions.builder()
-                .enableThinking(true) // 开启思考
+        DashScopeChatOptions options = DashScopeChatOptions.builder().enableThinking(true) // 开启思考
                 .temperature(0.3)  // 更低的温度，更确定的输出
-                .maxToken(1000) // 生成响应最多消耗token数
+                .maxToken(5000) // 生成响应最多消耗token数
                 .build();
 
         BeanOutputConverter outputConverter = new BeanOutputConverter<>(clz);
         String format = outputConverter.getFormat();
-        ReactAgent agent = ReactAgent.builder()
-                .name("content_generator")
-                .model(chatModel)
+        ReactAgent agent = ReactAgent.builder().name("content_generator").model(chatModel)
                 // 格式化输出
-                .outputSchema(format)
-                .chatOptions(options)
-                .build();
+                .outputSchema(format).chatOptions(options).build();
         AssistantMessage response;
         try {
             response = agent.call(new UserMessage(prompt));
@@ -291,9 +280,10 @@ public class ArticleAgentService {
     }
 
     /**
-     * 构建配图结果
+     * 构建配图结果对象
      */
-    private ArticleState.ImageResult buildImageResult(ArticleState.ImageRequirement requirement, String imageUrl,
+    private ArticleState.ImageResult buildImageResult(ArticleState.ImageRequirement requirement,
+                                                      String imageUrl,
                                                       ImageMethodEnum method) {
         ArticleState.ImageResult imageResult = new ArticleState.ImageResult();
         imageResult.setPosition(requirement.getPosition());
@@ -302,6 +292,7 @@ public class ArticleAgentService {
         imageResult.setKeywords(requirement.getKeywords());
         imageResult.setSectionTitle(requirement.getSectionTitle());
         imageResult.setDescription(requirement.getType());
+        imageResult.setPlaceholderId(requirement.getPlaceholderId());  // 记录占位符ID
         return imageResult;
     }
 

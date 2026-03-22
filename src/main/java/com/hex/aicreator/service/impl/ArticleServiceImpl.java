@@ -1,7 +1,7 @@
 package com.hex.aicreator.service.impl;
 
 import cn.hutool.core.util.IdUtil;
-import com.hex.aicreator.enums.ArticleTaskStatusEnum;
+import com.hex.aicreator.model.enums.ArticleTaskStatusEnum;
 import com.hex.aicreator.exception.BusinessException;
 import com.hex.aicreator.exception.ErrorCode;
 import com.hex.aicreator.exception.ThrowUtils;

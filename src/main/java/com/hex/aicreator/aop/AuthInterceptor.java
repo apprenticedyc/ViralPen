@@ -1,7 +1,7 @@
 package com.hex.aicreator.aop;
 
 import com.hex.aicreator.annotation.AuthCheck;
-import com.hex.aicreator.enums.UserRoleEnum;
+import com.hex.aicreator.model.enums.UserRoleEnum;
 import com.hex.aicreator.exception.BusinessException;
 import com.hex.aicreator.exception.ErrorCode;
 import com.hex.aicreator.model.entity.User;

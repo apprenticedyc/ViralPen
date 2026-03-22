@@ -1,11 +1,10 @@
-package com.hex.aicreator.service.impl;
+package com.hex.aicreator.service.impl.image;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.hex.aicreator.config.PexelsConfig;
-import com.hex.aicreator.constant.ArticleConstant;
-import com.hex.aicreator.enums.ImageMethodEnum;
+import com.hex.aicreator.config.image.PexelsConfig;
+import com.hex.aicreator.model.enums.ImageMethodEnum;
 import com.hex.aicreator.service.ImageSearchService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +31,7 @@ public class PexelsService implements ImageSearchService {
     private final OkHttpClient httpClient = new OkHttpClient();
 
     @Override
-    public String searchImage(String keywords) {
+    public String searchImageURL(String keywords) {
         try {
             String url = buildSearchUrl(keywords);
 
@@ -60,11 +59,6 @@ public class PexelsService implements ImageSearchService {
     @Override
     public ImageMethodEnum getMethod() {
         return ImageMethodEnum.PEXELS;
-    }
-
-    @Override
-    public String getFallbackImage(int position) {
-        return String.format(PICSUM_URL_TEMPLATE, position);
     }
 
     /**

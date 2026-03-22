@@ -72,37 +72,62 @@ public interface PromptTemplate {
             """;
 
     /**
-     * 智能体4：分析配图需求
+     * 智能体4：分析配图需求（支持多种图片来源，使用占位符方案）
      */
     String AGENT4_IMAGE_REQUIREMENTS_PROMPT = """
             你是一位专业的新媒体编辑,擅长为文章配图。
             
-            根据以下文章内容,分析配图需求:
+            根据以下文章内容,分析配图需求,并在正文中插入图片占位符:
             主标题：{mainTitle}
-            正文：{content}
+            正文：
+            {content}
+            
+            可用的配图方式：
+            PEXELS: 适合真实场景、产品照片、人物照片、自然风景等写实图片
+            EMOJI_PACK: 适合表情包、搞笑图片、轻松幽默的配图
+            SEEDREAM: AI生成图片工具，适合创意插画、信息图表、需要文字渲染、抽象概念、艺术风格
             
             要求:
-            1. 识别需要配图的位置(封面、关键章节等)
-            2. 建议配图数量: 3-5张
-            3. 为每个配图位置生成英文搜索关键词(适合 Pexels 图库检索)
-            4. 关键词要准确、具体,能检索到高质量图片
-            5. sectionTitle 必须与正文中的章节标题完全一致(用于定位插入位置)
-            6. position=1 为封面图,sectionTitle 留空
+            1. 识别需要配图的位置(封面、关键章节、段落之间等)
+            2. 根据文章内容和结构灵活决定配图数量，避免过多或过少
+            3. **在正文中插入占位符**：
+               - 占位符：{{IMAGE_PLACEHOLDER_N}}，其中 N 为配图序号（1, 2, 3...），必须独占一行
+               - 注意：position=1 的封面图不需要占位符，不要放在正文中
+               - 配图占位符可以放在任意合适位置（章节标题后、段落之间等）
+            4. **只能从上述可用的配图方式中选择**, 为每个配图选择最合适的图片来源(imageSource):
+            5. 对于 PEXELS 来源: 提供英文搜索关键词(keywords),要准确、具体
+            6. 对于 SEEDREAM 来源: 提供详细的图片生成提示词,描述场景、风格、细节
+            7. 对于 EMOJI_PACK 来源:
+               - 识别文章中轻松幽默、需要表情包的位置
+               - 提供中文或英文关键词（keywords），描述表情内容，如：开心、哭笑、无语、疑问
+               - prompt 留空
+               - 系统会自动在关键词后添加"表情包"进行搜索
+            8. placeholderId 必须与正文中插入的占位符完全一致
+            9. position=1 为封面图
             
-            请直接返回 JSON 格式,不要有其他内容,示例如下:
-            [
-              {
-                "position": 1,
-                "type": "cover",
-                "sectionTitle": "",
-                "keywords": "AI technology office modern"
-              },
-              {
-                "position": 2,
-                "type": "section",
-                "sectionTitle": "章节标题（与正文完全一致）",
-                "keywords": "business success teamwork"
-              }
-            ]
+            请直接返回 JSON 格式,不要有其他内容，实例如下:
+            {
+              "contentWithPlaceholders": "## 章节标题1\\n\\n第一段内容介绍核心概念。\\n\\n{{IMAGE_PLACEHOLDER_1}}",
+              "imageRequirements": [
+                {
+                  "position": 1,
+                  "type": "cover",
+                  "sectionTitle": "",
+                  "imageSource": "SEEDREAM",
+                  "keywords": "",
+                  "prompt": "提供给AI图生图工具的详细提示词，描述封面图的场景、风格、细节等要求",
+                  "placeholderId": ""
+                },
+                {
+                  "position": 2,
+                  "type": "section",
+                  "sectionTitle": "章节标题1",
+                  "imageSource": "PEXELS",
+                  "keywords": "english keywords for image search",
+                  "prompt": "",
+                  "placeholderId": "{{IMAGE_PLACEHOLDER_1}}"
+                }
+              ]
+            }
             """;
 }

@@ -1,4 +1,4 @@
-package com.hex.aicreator.enums;
+package com.hex.aicreator.model.enums;
 
 import lombok.Getter;
 

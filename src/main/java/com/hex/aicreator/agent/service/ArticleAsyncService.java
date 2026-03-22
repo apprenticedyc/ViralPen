@@ -1,7 +1,6 @@
 package com.hex.aicreator.agent.service;
-
-import com.hex.aicreator.enums.ArticleTaskStatusEnum;
-import com.hex.aicreator.enums.SseMessageTypeEnum;
+import com.hex.aicreator.model.enums.ArticleTaskStatusEnum;
+import com.hex.aicreator.model.enums.SseMessageTypeEnum;
 import com.hex.aicreator.manager.SseEmitterManager;
 import com.hex.aicreator.model.state.ArticleState;
 import com.hex.aicreator.service.ArticleService;

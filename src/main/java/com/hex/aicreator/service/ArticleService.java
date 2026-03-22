@@ -1,6 +1,6 @@
 package com.hex.aicreator.service;
 
-import com.hex.aicreator.enums.ArticleTaskStatusEnum;
+import com.hex.aicreator.model.enums.ArticleTaskStatusEnum;
 import com.hex.aicreator.model.dto.article.ArticleQueryRequest;
 import com.hex.aicreator.model.entity.User;
 import com.hex.aicreator.model.state.ArticleState;
