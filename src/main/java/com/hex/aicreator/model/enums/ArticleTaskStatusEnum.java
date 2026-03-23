@@ -3,8 +3,7 @@ package com.hex.aicreator.model.enums;
 import lombok.Getter;
 
 /**
- * 文章状态枚举
- *
+ * 文章任务执行状态
  */
 @Getter
 public enum ArticleTaskStatusEnum {

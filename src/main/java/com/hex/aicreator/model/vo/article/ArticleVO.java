@@ -10,9 +10,6 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * 文章视图
- **/
 @Data
 public class ArticleVO implements Serializable {
 
@@ -37,6 +34,11 @@ public class ArticleVO implements Serializable {
     private String topic;
 
     /**
+     * 用户补充描述
+     */
+    private String userDescription;
+
+    /**
      * 主标题
      */
     private String mainTitle;
@@ -45,6 +47,11 @@ public class ArticleVO implements Serializable {
      * 副标题
      */
     private String subTitle;
+
+    /**
+     * 标题方案列表
+     */
+    private List<TitleOption> titleOptions;
 
     /**
      * 大纲
@@ -77,6 +84,11 @@ public class ArticleVO implements Serializable {
     private String status;
 
     /**
+     * 当前阶段
+     */
+    private String phase;
+
+    /**
      * 错误信息
      */
     private String errorMessage;
@@ -90,6 +102,15 @@ public class ArticleVO implements Serializable {
      * 完成时间
      */
     private LocalDateTime completedTime;
+
+    /**
+     * 标题方案
+     */
+    @Data
+    public static class TitleOption implements Serializable {
+        private String mainTitle;
+        private String subTitle;
+    }
 
     /**
      * 大纲项
@@ -128,15 +149,17 @@ public class ArticleVO implements Serializable {
         BeanUtils.copyProperties(article, articleVO);
 
         // 转换 JSON 字段
+        if (article.getTitleOptions() != null) {
+            articleVO.setTitleOptions(GsonUtils.fromJson(article.getTitleOptions(),
+                    new TypeToken<List<TitleOption>>(){}));
+        }
         if (article.getOutline() != null) {
             articleVO.setOutline(GsonUtils.fromJson(article.getOutline(),
-                    new TypeToken<List<OutlineItem>>() {
-                    }));
+                    new TypeToken<List<OutlineItem>>(){}));
         }
         if (article.getImages() != null) {
             articleVO.setImages(GsonUtils.fromJson(article.getImages(),
-                    new TypeToken<List<ImageItem>>() {
-                    }));
+                    new TypeToken<List<ImageItem>>(){}));
         }
 
         return articleVO;

@@ -2,14 +2,17 @@ package com.hex.aicreator.agent.service;
 
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import com.alibaba.cloud.ai.graph.streaming.OutputType;
+import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import com.hex.aicreator.agent.prompt.PromptTemplate;
+import com.hex.aicreator.model.dto.image.ImageRequest;
 import com.hex.aicreator.model.enums.ImageMethodEnum;
 import com.hex.aicreator.model.enums.SseMessageTypeEnum;
-import com.hex.aicreator.model.dto.image.ImageRequest;
 import com.hex.aicreator.model.state.ArticleState;
 import com.hex.aicreator.service.impl.image.ImageServiceStrategy;
 import com.hex.aicreator.utils.CosService;
@@ -18,9 +21,6 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -44,60 +44,91 @@ public class ArticleAgentService {
     private CosService cosService;
 
     /**
-     * 执行完整的文章生成流程
+     * 阶段1：生成标题方案（3-5个）
      *
-     * @param state         全局状态
+     * @param state         文章状态
      * @param streamHandler 流式输出处理器
      */
-    public void generateArticleWorkFlow(ArticleState state, Consumer<String> streamHandler) {
+    public void executePhase1(ArticleState state, Consumer<String> streamHandler) {
         try {
-            // 智能体1：生成标题
-            log.info("智能体1：开始生成标题, taskId={}", state.getTaskId());
-            agent1GenerateTitle(state);
-            //accept(...)是抽象的消息消费(处理)逻辑,具体逻辑由调用方实现
+            // 智能体1：生成标题方案
+            log.info("阶段1：开始生成标题方案, taskId={}", state.getTaskId());
+            agent1GenerateTitleOptions(state);
             streamHandler.accept(SseMessageTypeEnum.AGENT1_COMPLETE.getValue());
-
-            // 智能体2：生成大纲（流式输出）
-            log.info("智能体2：开始生成大纲, taskId={}", state.getTaskId());
-            agent2GenerateOutline(state, streamHandler);
-            streamHandler.accept(SseMessageTypeEnum.AGENT2_COMPLETE.getValue());
-
-            // 智能体3：生成正文（流式输出）
-            log.info("智能体3：开始生成正文, taskId={}", state.getTaskId());
-            agent3GenerateContent(state, streamHandler);
-            streamHandler.accept(SseMessageTypeEnum.AGENT3_COMPLETE.getValue());
-
-            // 智能体4：分析配图需求
-            log.info("智能体4：开始分析配图需求, taskId={}", state.getTaskId());
-            agent4AnalyzeImageRequirements(state);
-            streamHandler.accept(SseMessageTypeEnum.AGENT4_COMPLETE.getValue());
-
-            // 智能体5：生成配图
-            log.info("智能体5：开始生成配图, taskId={}", state.getTaskId());
-            agent5GenerateImages(state, streamHandler);
-            streamHandler.accept(SseMessageTypeEnum.AGENT5_COMPLETE.getValue());
-
-            // 图文合成：将配图插入正文
-            log.info("开始图文合成, taskId={}", state.getTaskId());
-            mergeImagesIntoContent(state);
-            streamHandler.accept(SseMessageTypeEnum.MERGE_COMPLETE.getValue());
-
-            log.info("文章生成完成, taskId={}", state.getTaskId());
+            log.info("阶段1：标题方案生成完成, taskId={}, optionsCount={}", state.getTaskId(), state.getTitleOptions()
+                    .size());
         } catch (Exception e) {
-            log.error("文章生成失败, taskId={}", state.getTaskId(), e);
-            throw new RuntimeException("文章生成失败: " + e.getMessage(), e);
+            log.error("阶段1：标题方案生成失败, taskId={}", state.getTaskId(), e);
+            throw new RuntimeException("标题方案生成失败: " + e.getMessage(), e);
         }
     }
 
     /**
-     * 智能体1：生成标题
+     * 阶段2：生成大纲（用户选择标题后）
+     *
+     * @param state         文章状态
+     * @param streamHandler 流式输出处理器
      */
-    private void agent1GenerateTitle(ArticleState state) {
+    public void executePhase2(ArticleState state, Consumer<String> streamHandler) {
+        try {
+            // 智能体2：生成大纲（流式输出）
+            log.info("阶段2：开始生成大纲, taskId={}", state.getTaskId());
+            agent2GenerateOutline(state, streamHandler);
+            streamHandler.accept(SseMessageTypeEnum.AGENT2_COMPLETE.getValue());
+            log.info("阶段2：大纲生成完成, taskId={}", state.getTaskId());
+        } catch (Exception e) {
+            log.error("阶段2：大纲生成失败, taskId={}", state.getTaskId(), e);
+            throw new RuntimeException("大纲生成失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 阶段3：生成正文+配图（用户确认大纲后）
+     *
+     * @param state         文章状态
+     * @param streamHandler 流式输出处理器
+     */
+    public void executePhase3(ArticleState state, Consumer<String> streamHandler) {
+        try {
+            // 智能体3：生成正文（流式输出）
+            log.info("阶段3：开始生成正文, taskId={}", state.getTaskId());
+            agent3GenerateContent(state, streamHandler);
+            streamHandler.accept(SseMessageTypeEnum.AGENT3_COMPLETE.getValue());
+
+            // 智能体4：分析配图需求
+            log.info("阶段3：开始分析配图需求, taskId={}", state.getTaskId());
+            agent4AnalyzeImageRequirements(state);
+            streamHandler.accept(SseMessageTypeEnum.AGENT4_COMPLETE.getValue());
+
+            // 智能体5：生成配图
+            log.info("阶段3：开始生成配图, taskId={}", state.getTaskId());
+            agent5GenerateImages(state, streamHandler);
+            streamHandler.accept(SseMessageTypeEnum.AGENT5_COMPLETE.getValue());
+
+            // 图文合成：将配图插入正文
+            log.info("阶段3：开始图文合成, taskId={}", state.getTaskId());
+            mergeImagesIntoContent(state);
+            streamHandler.accept(SseMessageTypeEnum.MERGE_COMPLETE.getValue());
+
+            log.info("阶段3：正文生成完成, taskId={}", state.getTaskId());
+        } catch (Exception e) {
+            log.error("阶段3：正文生成失败, taskId={}", state.getTaskId(), e);
+            throw new RuntimeException("正文生成失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 智能体1：生成标题方案（3-5个）
+     */
+    private void agent1GenerateTitleOptions(ArticleState state) {
         String prompt = PromptTemplate.AGENT1_TITLE_PROMPT.replace("{topic}", state.getTopic());
-        String content = call(prompt, ArticleState.TitleResult.class);
-        ArticleState.TitleResult titleResult = parseJsonResponse(content, ArticleState.TitleResult.class, "标题");
-        state.setTitle(titleResult);
-        log.info("智能体1：标题生成成功, mainTitle={}", titleResult.getMainTitle());
+
+        String content = call(prompt, new TypeToken<List<ArticleState.TitleOption>>() {
+        }.getClass());
+        List<ArticleState.TitleOption> titleOptions = parseJsonListResponse(content, new TypeToken<List<ArticleState.TitleOption>>() {
+        }, "标题方案");
+        state.setTitleOptions(titleOptions);
+        log.info("智能体1：标题方案生成成功, optionsCount={}", titleOptions.size());
     }
 
 
@@ -105,14 +136,19 @@ public class ArticleAgentService {
      * 智能体2：生成大纲（流式输出）
      */
     private void agent2GenerateOutline(ArticleState state, Consumer<String> streamHandler) {
-        String prompt = PromptTemplate.AGENT2_OUTLINE_PROMPT.replace("{mainTitle}", state.getTitle().getMainTitle())
-                .replace("{subTitle}", state.getTitle().getSubTitle());
+        // 1. 构建用户补充描述的 prompt 部分（如果有的话）
+        String userDescriptionPrompt = state.getUserDescription() == null ? "" : PromptTemplate.USER_DESCRIPTION_POMPT.replace("{userDescription}", state.getUserDescription());
 
-        String content = stream(prompt, streamHandler, SseMessageTypeEnum.AGENT2_STREAMING);
+        // 2. 构建完整的 prompt，动态插入标题和用户补充描述提示词
+        String prompt = PromptTemplate.AGENT2_OUTLINE_PROMPT.replace("{mainTitle}", state.getTitle().getMainTitle())
+                .replace("{subTitle}", state.getTitle().getSubTitle())
+                .replace("{USER_DESCRIPTION_PROMPT}", userDescriptionPrompt);
+        String content = stream(prompt, streamHandler, SseMessageTypeEnum.AGENT2_STREAMING, ArticleState.OutlineResult.class);
         ArticleState.OutlineResult outlineResult = parseJsonResponse(content, ArticleState.OutlineResult.class, "大纲");
         state.setOutline(outlineResult);
         log.info("智能体2：大纲生成成功, sections={}", outlineResult.getSections().size());
     }
+
 
     /**
      * 智能体3：生成正文（流式输出）
@@ -122,7 +158,7 @@ public class ArticleAgentService {
         String prompt = PromptTemplate.AGENT3_CONTENT_PROMPT.replace("{mainTitle}", state.getTitle().getMainTitle())
                 .replace("{subTitle}", state.getTitle().getSubTitle()).replace("{outline}", outlineText);
 
-        String content = stream(prompt, streamHandler, SseMessageTypeEnum.AGENT3_STREAMING);
+        String content = stream(prompt, streamHandler, SseMessageTypeEnum.AGENT3_STREAMING, String.class);
         state.setContent(content);
         log.info("智能体3：正文生成成功, length={}", content.length());
     }
@@ -131,9 +167,8 @@ public class ArticleAgentService {
      * 智能体4：分析配图需求（在正文中插入占位符）
      */
     private void agent4AnalyzeImageRequirements(ArticleState state) {
-        String prompt = PromptTemplate.AGENT4_IMAGE_REQUIREMENTS_PROMPT
-                .replace("{mainTitle}", state.getTitle().getMainTitle())
-                .replace("{content}", state.getContent());
+        String prompt = PromptTemplate.AGENT4_IMAGE_REQUIREMENTS_PROMPT.replace("{mainTitle}", state.getTitle()
+                .getMainTitle()).replace("{content}", state.getContent());
 
         String content = call(prompt, ArticleState.Agent4Result.class);
         ArticleState.Agent4Result agent4Result = parseJsonResponse(content, ArticleState.Agent4Result.class, "配图需求");
@@ -208,7 +243,7 @@ public class ArticleAgentService {
     // startregion辅助方法
 
     /**
-     * 调用 LLM（非流式）
+     * 调用 LLM（非流式）结构化输出
      */
     private String call(String prompt, Class clz) {
         DashScopeChatOptions options = DashScopeChatOptions.builder().enableThinking(true) // 开启思考
@@ -216,11 +251,9 @@ public class ArticleAgentService {
                 .maxToken(5000) // 生成响应最多消耗token数
                 .build();
 
-        BeanOutputConverter outputConverter = new BeanOutputConverter<>(clz);
-        String format = outputConverter.getFormat();
-        ReactAgent agent = ReactAgent.builder().name("content_generator").model(chatModel)
-                // 格式化输出
-                .outputSchema(format).chatOptions(options).build();
+        ReactAgent agent = ReactAgent.builder().name("content_generator").model(chatModel) // 指定LLM
+                .outputType(clz) // 格式化输出
+                .chatOptions(options).build();
         AssistantMessage response;
         try {
             response = agent.call(new UserMessage(prompt));
@@ -234,17 +267,38 @@ public class ArticleAgentService {
     /**
      * 调用 LLM（流式输出）
      */
-    private String stream(String prompt, Consumer<String> streamHandler, SseMessageTypeEnum messageType) {
-        StringBuilder contentBuilder = new StringBuilder();
-        Flux<ChatResponse> streamResponse = chatModel.stream(new Prompt(new UserMessage(prompt)));
+    private String stream(String prompt, Consumer<String> streamHandler, SseMessageTypeEnum messageType, Class clz) {
+        DashScopeChatOptions options = DashScopeChatOptions.builder().enableThinking(true) // 开启思考
+                .temperature(0.3)  // 更低的温度，更确定的输出
+                .maxToken(5000) // 生成响应最多消耗token数
+                .build();
 
-        streamResponse
+        StringBuilder contentBuilder = new StringBuilder();
+        ReactAgent agent = ReactAgent.builder().name("content_generator").model(chatModel) // 指定LLM
+                .outputType(clz) // 格式化输出
+                .chatOptions(options).build();
+
+        Flux<NodeOutput> response;
+        try {
+            response = agent.stream(new UserMessage(prompt));
+        } catch (GraphRunnerException e) {
+            log.error("LLM 调用失败, prompt={}", prompt, e);
+            throw new RuntimeException("LLM 调用失败: " + e.getMessage(), e);
+        }
+        response
                 // 处理响应流中元素, 来一个拼接一个, 并通过streamHandler推送给前端
-                .doOnNext(chatResponse -> {
-                    String content = chatResponse.getResult().getOutput().getText();
-                    if (content != null && !content.isEmpty()) {
-                        contentBuilder.append(content);
-                        streamHandler.accept(messageType.getStreamingPrefix() + content);
+                .doOnNext(output -> {
+                    if (output instanceof StreamingOutput streamingOutput) {
+                        OutputType type = streamingOutput.getOutputType();
+                        // 处理模型推理的流式输出
+                        if (type == OutputType.AGENT_MODEL_STREAMING) {
+                            String text = streamingOutput.message().getText();
+                            contentBuilder.append(text);
+                            // 实时推送进度
+                            streamHandler.accept(messageType.getStreamingPrefix() + text);
+                        } else if (type == OutputType.AGENT_MODEL_FINISHED) {
+                            log.info("\n模型流式输出完成");
+                        }
                     }
                 })
                 // 错误处理, 记录日志
@@ -253,6 +307,32 @@ public class ArticleAgentService {
                 .blockLast();
         return contentBuilder.toString();
     }
+
+    /**
+     * AI 修改大纲
+     *
+     * @param mainTitle        主标题
+     * @param subTitle         副标题
+     * @param currentOutline   当前大纲
+     * @param modifySuggestion 用户修改建议
+     * @return 修改后的大纲
+     */
+    public List<ArticleState.OutlineSection> aiModifyOutline(String mainTitle, String subTitle,
+                                                             List<ArticleState.OutlineSection> currentOutline,
+                                                             String modifySuggestion) {
+        String currentOutlineJson = GsonUtils.toJson(currentOutline);
+
+        String prompt = PromptTemplate.AI_MODIFY_OUTLINE_PROMPT.replace("{mainTitle}", mainTitle)
+                .replace("{subTitle}", subTitle).replace("{currentOutline}", currentOutlineJson)
+                .replace("{modifySuggestion}", modifySuggestion);
+
+        String content = call(prompt, ArticleState.OutlineResult.class);
+        ArticleState.OutlineResult outlineResult = parseJsonResponse(content, ArticleState.OutlineResult.class, "修改后的大纲");
+
+        log.info("AI修改大纲成功, sectionsCount={}", outlineResult.getSections().size());
+        return outlineResult.getSections();
+    }
+
 
     /**
      * 解析 JSON 响应
@@ -282,8 +362,7 @@ public class ArticleAgentService {
     /**
      * 构建配图结果对象
      */
-    private ArticleState.ImageResult buildImageResult(ArticleState.ImageRequirement requirement,
-                                                      String imageUrl,
+    private ArticleState.ImageResult buildImageResult(ArticleState.ImageRequirement requirement, String imageUrl,
                                                       ImageMethodEnum method) {
         ArticleState.ImageResult imageResult = new ArticleState.ImageResult();
         imageResult.setPosition(requirement.getPosition());

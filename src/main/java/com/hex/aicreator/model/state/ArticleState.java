@@ -1,5 +1,6 @@
 package com.hex.aicreator.model.state;
 
+import lombok.Builder;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -10,6 +11,7 @@ import java.util.List;
  *
  */
 @Data
+@Builder
 public class ArticleState implements Serializable {
 
     /**
@@ -26,11 +28,6 @@ public class ArticleState implements Serializable {
      * 用户补充描述
      */
     private String userDescription;
-
-    /**
-     * 文章风格
-     */
-    private String style;
 
     /**
      * 当前阶段
@@ -76,6 +73,7 @@ public class ArticleState implements Serializable {
      * 允许的配图方式列表（为空表示支持所有方式）
      */
     private List<String> enabledImageMethods;
+
 
     /**
      * 标题方案

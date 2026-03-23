@@ -8,10 +8,11 @@ import com.hex.aicreator.common.ResultUtils;
 import com.hex.aicreator.exception.ErrorCode;
 import com.hex.aicreator.exception.ThrowUtils;
 import com.hex.aicreator.manager.SseEmitterManager;
-import com.hex.aicreator.model.dto.article.ArticleCreateRequest;
-import com.hex.aicreator.model.dto.article.ArticleQueryRequest;
+import com.hex.aicreator.model.dto.article.*;
 import com.hex.aicreator.model.entity.User;
+import com.hex.aicreator.model.state.ArticleState;
 import com.hex.aicreator.model.vo.article.ArticleVO;
+import com.hex.aicreator.service.ArticleService;
 import com.hex.aicreator.service.UserService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,17 +20,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.beans.factory.annotation.Autowired;
-import com.hex.aicreator.model.entity.Article;
-import com.hex.aicreator.service.ArticleService;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
@@ -61,20 +52,28 @@ public class ArticleController {
      * 生成文章接口
      */
     @PostMapping("/create")
-    @Operation(summary = "生成文章")
+    @Operation(summary = "创建文章任务")
     public BaseResponse<String> createArticle(@RequestBody ArticleCreateRequest request, HttpServletRequest httpServletRequest) {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
         ThrowUtils.throwIf(request.getTopic() == null || request.getTopic().trim().isEmpty(),
                 ErrorCode.PARAMS_ERROR, "选题不能为空");
 
         User loginUser = userService.getLoginUser(httpServletRequest);
-        // 创建文章任务并入库，返回任务ID
-        String taskId = articleService.createArticleTask(request.getTopic(), loginUser);
-        // 异步执行文章生成工作流 绑定任务ID
-        articleAsyncService.startWorkFlow(taskId, request.getTopic());
 
+        // 检查并消耗配额 + 创建文章任务（在同一事务中）
+        String taskId = articleService.createArticleTask(
+                request.getTopic(),
+                loginUser
+        );
+
+        // 异步执行阶段1：生成标题方案
+        articleAsyncService.workFLow_Phase1(
+                taskId,
+                request.getTopic()
+        );
         return ResultUtils.success(taskId);
     }
+
 
     /**
      * SSE 进度推送
@@ -108,6 +107,93 @@ public class ArticleController {
         ArticleVO articleVO = articleService.getArticleDetail(taskId, loginUser);
         return ResultUtils.success(articleVO);
     }
+
+
+    /**
+     * 确认标题并输入补充描述
+     */
+    @PostMapping("/confirm-title")
+    @Operation(summary = "确认标题并输入补充描述")
+    public BaseResponse<Void> confirmTitle(@RequestBody ArticleConfirmTitleRequest request,
+                                           HttpServletRequest httpServletRequest) {
+        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(request.getTaskId() == null || request.getTaskId().trim().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "任务ID不能为空");
+        ThrowUtils.throwIf(request.getSelectedMainTitle() == null || request.getSelectedMainTitle().trim().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "主标题不能为空");
+        ThrowUtils.throwIf(request.getSelectedSubTitle() == null || request.getSelectedSubTitle().trim().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "副标题不能为空");
+
+        User loginUser = userService.getLoginUser(httpServletRequest);
+
+        // 确认标题
+        articleService.confirmTitle(
+                request.getTaskId(),
+                request.getSelectedMainTitle(),
+                request.getSelectedSubTitle(),
+                request.getUserDescription(),
+                loginUser
+        );
+
+        // 异步执行阶段2：生成大纲
+        articleAsyncService.workFLow_Phase2(request.getTaskId());
+
+        return ResultUtils.success(null);
+    }
+
+    /**
+     * 确认大纲
+     */
+    @PostMapping("/confirm-outline")
+    @Operation(summary = "确认大纲")
+    public BaseResponse<Void> confirmOutline(@RequestBody ArticleConfirmOutlineRequest request,
+                                             HttpServletRequest httpServletRequest) {
+        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(request.getTaskId() == null || request.getTaskId().trim().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "任务ID不能为空");
+        ThrowUtils.throwIf(request.getOutline() == null || request.getOutline().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "大纲不能为空");
+
+        User loginUser = userService.getLoginUser(httpServletRequest);
+
+        // 确认大纲
+        articleService.confirmOutline(
+                request.getTaskId(),
+                request.getOutline(),
+                loginUser
+        );
+
+        // 异步执行阶段3：生成正文+配图
+        articleAsyncService.workFLow_Phase3(request.getTaskId());
+
+        return ResultUtils.success(null);
+    }
+
+    /**
+     * AI 修改大纲
+     */
+    @PostMapping("/ai-modify-outline")
+    @Operation(summary = "AI 修改大纲")
+    public BaseResponse<List<ArticleState.OutlineSection>> aiModifyOutline(
+            @RequestBody ArticleAiModifyOutlineRequest request,
+            HttpServletRequest httpServletRequest) {
+        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(request.getTaskId() == null || request.getTaskId().trim().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "任务ID不能为空");
+        ThrowUtils.throwIf(request.getModifySuggestion() == null || request.getModifySuggestion().trim().isEmpty(),
+                ErrorCode.PARAMS_ERROR, "修改建议不能为空");
+        User loginUser = userService.getLoginUser(httpServletRequest);
+
+        // AI 修改大纲
+        List<ArticleState.OutlineSection> modifiedOutline = articleService.aiModifyOutline(
+                request.getTaskId(),
+                request.getModifySuggestion(),
+                loginUser
+        );
+
+        return ResultUtils.success(modifiedOutline);
+    }
+
 
     /**
      * 分页查询文章列表

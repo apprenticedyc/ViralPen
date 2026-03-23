@@ -4,6 +4,7 @@ import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
+
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
@@ -23,7 +24,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("article")
+@Table(value = "article", camelToUnderline = false)
 public class Article implements Serializable {
 
     @Serial
@@ -38,13 +39,11 @@ public class Article implements Serializable {
     /**
      * 任务ID（UUID）
      */
-    @Column("taskId")
     private String taskId;
 
     /**
      * 用户ID
      */
-    @Column("userId")
     private Long userId;
 
     /**
@@ -55,13 +54,11 @@ public class Article implements Serializable {
     /**
      * 主标题
      */
-    @Column("mainTitle")
     private String mainTitle;
 
     /**
      * 副标题
      */
-    @Column("subTitle")
     private String subTitle;
 
     /**
@@ -77,13 +74,11 @@ public class Article implements Serializable {
     /**
      * 完整图文（Markdown格式，含配图）
      */
-    @Column("fullContent")
     private String fullContent;
 
     /**
      * 封面图 URL
      */
-    @Column("coverImage")
     private String coverImage;
 
     /**
@@ -99,31 +94,46 @@ public class Article implements Serializable {
     /**
      * 错误信息
      */
-    @Column("errorMessage")
     private String errorMessage;
 
     /**
      * 创建时间
      */
-    @Column("createTime")
     private LocalDateTime createTime;
 
     /**
      * 完成时间
      */
-    @Column("completedTime")
     private LocalDateTime completedTime;
 
     /**
      * 更新时间
      */
-    @Column("updateTime")
     private LocalDateTime updateTime;
 
     /**
      * 是否删除
      */
-    @Column(value = "isDelete", isLogicDelete = true)
+    @Column(isLogicDelete = true)
     private Integer isDelete;
 
+    /**
+     * 用户补充描述
+     */
+    private String userDescription;
+
+    /**
+     * 允许的配图方式列表（JSON格式）
+     */
+    private String enabledImageMethods;
+
+    /**
+     * 标题方案列表（JSON格式）
+     */
+    private String titleOptions;
+
+    /**
+     * 当前阶段：PENDING/TITLE_GENERATING/TITLE_SELECTING/OUTLINE_GENERATING/OUTLINE_EDITING/CONTENT_GENERATING
+     */
+    private String phase;
 }

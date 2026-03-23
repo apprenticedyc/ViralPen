@@ -36,9 +36,4 @@ public class ImageRequest {
      * 宽高比（如 16:9, 1:1）
      */
     private String aspectRatio;
-
-    /**
-     * 图片风格描述
-     */
-    private String style;
 }

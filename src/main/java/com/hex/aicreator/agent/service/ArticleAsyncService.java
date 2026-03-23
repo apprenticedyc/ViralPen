@@ -1,5 +1,8 @@
 package com.hex.aicreator.agent.service;
-import com.hex.aicreator.model.enums.ArticleTaskStatusEnum;
+
+import com.google.gson.reflect.TypeToken;
+import com.hex.aicreator.model.entity.Article;
+import com.hex.aicreator.model.enums.ArticlePhaseEnum;
 import com.hex.aicreator.model.enums.SseMessageTypeEnum;
 import com.hex.aicreator.manager.SseEmitterManager;
 import com.hex.aicreator.model.state.ArticleState;
@@ -9,8 +12,10 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import com.hex.aicreator.model.enums.ArticleTaskStatusEnum;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -27,26 +32,141 @@ public class ArticleAsyncService {
     private ArticleService articleService;
 
     /**
-     * 异步执行文章生成
+     * 阶段1：异步生成标题方案
      *
      * @param taskId 任务ID
      * @param topic  选题
      */
     @Async("articleExecutor")
-    public void startWorkFlow(String taskId, String topic) {
-        log.info("异步任务开始, taskId={}, topic={}", taskId, topic);
+    public void workFLow_Phase1(String taskId, String topic) {
+        log.info("阶段1异步任务开始");
 
         try {
-            // 更新状态为处理中
+            // 更新状态和阶段
             articleService.updateArticleStatus(taskId, ArticleTaskStatusEnum.PROCESSING, null);
+            articleService.updatePhase(taskId, ArticlePhaseEnum.TITLE_GENERATING);
 
             // 创建状态对象
-            ArticleState state = new ArticleState();
-            state.setTaskId(taskId);
-            state.setTopic(topic);
+            ArticleState state = ArticleState.builder().taskId(taskId).topic(topic).build();
+            // 执行阶段1：生成标题方案
+            articleAgentService.executePhase1(state, message -> {
+                handleAgentMessage(taskId, message, state);
+            });
+            // 保存标题方案到数据库
+            articleService.saveTitleOptions(taskId, state.getTitleOptions());
+            // 更新阶段为等待选择标题
+            articleService.updatePhase(taskId, ArticlePhaseEnum.TITLE_SELECTING);
+            // 推送标题方案生成完成消息
+            Map<String, Object> data = new HashMap<>();
+            data.put("titleOptions", state.getTitleOptions());
+            sendSseMessage(taskId, SseMessageTypeEnum.TITLES_GENERATED, data);
+            log.info("阶段1异步任务完成, taskId={}", taskId);
+        } catch (Exception e) {
+            log.error("阶段1异步任务失败, taskId={}", taskId, e);
+            // 更新状态为失败
+            articleService.updateArticleStatus(taskId, ArticleTaskStatusEnum.FAILED, e.getMessage());
+            // 推送错误消息
+            sendSseMessage(taskId, SseMessageTypeEnum.ERROR, Map.of("message", e.getMessage()));
+            // 完成 SSE 连接
+            sseEmitterManager.complete(taskId);
+        }
+    }
 
-            // 执行智能体编排,并通过 SSE 推送进度
-            articleAgentService.generateArticleWorkFlow(state, message -> {
+    /**
+     * 阶段2：异步生成大纲（用户确认标题后调用）
+     *
+     * @param taskId 任务ID
+     */
+    @Async("articleExecutor")
+    public void workFLow_Phase2(String taskId) {
+        log.info("阶段2异步任务开始, taskId={}", taskId);
+
+        try {
+            // 获取文章信息
+            Article article = articleService.getByTaskId(taskId);
+            if (article == null) {
+                throw new RuntimeException("文章不存在");
+            }
+
+            // 创建状态对象
+            ArticleState state = ArticleState.builder().taskId(taskId).userDescription(article.getUserDescription())
+                    .build();
+
+            // 设置标题
+            ArticleState.TitleResult title = new ArticleState.TitleResult();
+            title.setMainTitle(article.getMainTitle());
+            title.setSubTitle(article.getSubTitle());
+            state.setTitle(title);
+
+            // 执行阶段2：生成大纲
+            articleAgentService.executePhase2(state, message -> {
+                handleAgentMessage(taskId, message, state);
+            });
+
+            // 保存大纲到数据库
+            Article articleToUpdate = articleService.getByTaskId(taskId);
+            articleToUpdate.setOutline(GsonUtils.toJson(state.getOutline().getSections()));
+            articleService.updateById(articleToUpdate);
+
+            // 更新阶段为等待编辑大纲
+            articleService.updatePhase(taskId, ArticlePhaseEnum.OUTLINE_EDITING);
+
+            // 推送大纲生成完成消息
+            Map<String, Object> data = new HashMap<>();
+            data.put("outline", state.getOutline().getSections());
+            sendSseMessage(taskId, SseMessageTypeEnum.OUTLINE_GENERATED, data);
+
+            log.info("阶段2异步任务完成, taskId={}", taskId);
+        } catch (Exception e) {
+            log.error("阶段2异步任务失败, taskId={}", taskId, e);
+
+            articleService.updateArticleStatus(taskId, ArticleTaskStatusEnum.FAILED, e.getMessage());
+            sendSseMessage(taskId, SseMessageTypeEnum.ERROR, Map.of("message", e.getMessage()));
+            sseEmitterManager.complete(taskId);
+        }
+    }
+
+    /**
+     * 阶段3：异步生成正文+配图（用户确认大纲后调用）
+     *
+     * @param taskId 任务ID
+     */
+    @Async("articleExecutor")
+    public void workFLow_Phase3(String taskId) {
+        log.info("阶段3异步任务开始, taskId={}", taskId);
+
+        try {
+            // 获取文章信息
+            Article article = articleService.getByTaskId(taskId);
+            if (article == null) {
+                throw new RuntimeException("文章不存在");
+            }
+            // 创建状态对象
+            ArticleState state = ArticleState.builder().taskId(taskId).build();
+
+            // 从数据库获取允许的配图方式
+            List<String> enabledMethods = null;
+            if (article.getEnabledImageMethods() != null) {
+                enabledMethods = GsonUtils.fromJson(article.getEnabledImageMethods(), new TypeToken<List<String>>() {
+                });
+            }
+            state.setEnabledImageMethods(enabledMethods);
+
+            // 设置标题
+            ArticleState.TitleResult title = new ArticleState.TitleResult();
+            title.setMainTitle(article.getMainTitle());
+            title.setSubTitle(article.getSubTitle());
+            state.setTitle(title);
+
+            // 设置大纲
+            List<ArticleState.OutlineSection> outlineSections = GsonUtils.fromJson(article.getOutline(), new TypeToken<List<ArticleState.OutlineSection>>() {
+            });
+            ArticleState.OutlineResult outlineResult = new ArticleState.OutlineResult();
+            outlineResult.setSections(outlineSections);
+            state.setOutline(outlineResult);
+
+            // 执行阶段3：生成正文+配图
+            articleAgentService.executePhase3(state, message -> {
                 handleAgentMessage(taskId, message, state);
             });
 
@@ -62,17 +182,12 @@ public class ArticleAsyncService {
             // 完成 SSE 连接
             sseEmitterManager.complete(taskId);
 
-            log.info("异步任务完成, taskId={}", taskId);
+            log.info("阶段3异步任务完成, taskId={}", taskId);
         } catch (Exception e) {
-            log.error("异步任务失败, taskId={}", taskId, e);
+            log.error("阶段3异步任务失败, taskId={}", taskId, e);
 
-            // 更新状态为失败
             articleService.updateArticleStatus(taskId, ArticleTaskStatusEnum.FAILED, e.getMessage());
-
-            // 推送错误消息
             sendSseMessage(taskId, SseMessageTypeEnum.ERROR, Map.of("message", e.getMessage()));
-
-            // 完成 SSE 连接
             sseEmitterManager.complete(taskId);
         }
     }
@@ -97,13 +212,11 @@ public class ArticleAsyncService {
         String imageCompletePrefix = SseMessageTypeEnum.IMAGE_COMPLETE.getStreamingPrefix();
 
         if (message.startsWith(streamingPrefix2)) {
-            return buildStreamingData(SseMessageTypeEnum.AGENT2_STREAMING,
-                    message.substring(streamingPrefix2.length()));
+            return buildStreamingData(SseMessageTypeEnum.AGENT2_STREAMING, message.substring(streamingPrefix2.length()));
         }
 
         if (message.startsWith(streamingPrefix3)) {
-            return buildStreamingData(SseMessageTypeEnum.AGENT3_STREAMING,
-                    message.substring(streamingPrefix3.length()));
+            return buildStreamingData(SseMessageTypeEnum.AGENT3_STREAMING, message.substring(streamingPrefix3.length()));
         }
 
         if (message.startsWith(imageCompletePrefix)) {

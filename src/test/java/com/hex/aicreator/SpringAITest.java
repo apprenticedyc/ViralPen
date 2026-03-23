@@ -3,8 +3,11 @@ package com.hex.aicreator;
 import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
+import com.alibaba.cloud.ai.graph.streaming.OutputType;
+import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.hex.aicreator.model.state.ArticleState;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
@@ -84,24 +87,56 @@ public class SpringAITest {
         // 使用BeanOutputConverter生成输出结构
         BeanOutputConverter<ArticleState.TitleOption> outputConverter = new BeanOutputConverter<>(ArticleState.TitleOption.class);
         String format = outputConverter.getFormat();
-        /// 解析并生成的输出结构
-        ///"properties" : {
-        ///     "mainTitle" : {
-        ///       "type" : "string"
-        ///     },
-        ///     "subTitle" : {
-        ///       "type" : "string"
-        ///     }
-        ///   },
         ReactAgent agent = ReactAgent.builder().name("contact_extractor").model(chatModel).outputSchema(format).build();
 
         AssistantMessage result = agent.call("从以下信息提取标题：新华全媒头条丨守护“城市奔跑者”奋斗路——全方位夯实新就业群体权益保障根基");
 
         System.out.println(result.getText());
-        // 输出:
-        // {
-        //  "mainTitle": "守护“城市奔跑者”奋斗路",
-        //  "subTitle": "全方位夯实新就业群体权益保障根基"
-        // }
+
+    }
+
+    @Test
+    public void testStream() throws GraphRunnerException {
+        DashScopeChatOptions options = DashScopeChatOptions.builder()
+                .enableThinking(true) // 有些模型必须强制手动开启思考模式
+                .model("tongyi-xiaomi-analysis-flash") // 指定模型型号
+                .temperature(0.3) // 温度决定输出随机性
+                .maxToken(2000) // 生成响应最大消耗的token
+                .build();
+
+        // 创建 DashScope API 实例
+        DashScopeApi dashScopeApi = DashScopeApi.builder()
+                .apiKey("sk-7220ede328d14663b123ce3ccf7d54ac")
+                .build();
+
+        ChatModel chatModel = DashScopeChatModel.builder()
+                .dashScopeApi(dashScopeApi)
+                .defaultOptions(options) // 将定义的选项作为默认配置
+                .build();
+
+        ReactAgent agent = ReactAgent.builder()
+                .name("streaming_agent")
+                .model(chatModel)
+                .build();
+
+        Flux<NodeOutput> stream = agent.stream("帮我写一首关于春天的诗");
+
+        stream.doOnNext(
+                output -> {
+                    if (output instanceof StreamingOutput streamingOutput) {
+                        OutputType type = streamingOutput.getOutputType();
+
+                        // 处理模型推理的流式输出
+                        if (type == OutputType.AGENT_MODEL_STREAMING) {
+                            // 流式增量内容，逐步显示
+                            System.out.print(streamingOutput.message().getText());
+                        } else if (type == OutputType.AGENT_MODEL_FINISHED) {
+                            // 模型推理完成，可获取完整响应
+                            System.out.println("\n模型输出完成");
+                        }
+                    }
+                }
+        ).blockLast();
+
     }
 }
