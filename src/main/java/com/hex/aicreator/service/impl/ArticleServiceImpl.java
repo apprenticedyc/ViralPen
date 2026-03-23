@@ -12,6 +12,7 @@ import com.hex.aicreator.model.dto.article.ArticleQueryRequest;
 import com.hex.aicreator.model.entity.User;
 import com.hex.aicreator.model.state.ArticleState;
 import com.hex.aicreator.model.vo.article.ArticleVO;
+import com.hex.aicreator.service.QuotaService;
 import com.hex.aicreator.utils.GsonUtils;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -22,12 +23,14 @@ import com.hex.aicreator.service.ArticleService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static com.hex.aicreator.constant.UserConstant.ADMIN_ROLE;
+import static com.hex.aicreator.constant.UserConstant.VIP_ROLE;
 
 /**
  * 文章表 服务层实现。
@@ -39,6 +42,8 @@ import static com.hex.aicreator.constant.UserConstant.ADMIN_ROLE;
 public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> implements ArticleService {
     @Resource
     private ArticleAgentService articleAgentService;
+    @Resource
+    private QuotaService quotaService;
 
     @Override
     public String createArticleTask(String topic, User loginUser) {
@@ -54,6 +59,15 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
         this.save(article);
         log.info("文章任务已创建, taskId={}, userId={}", taskId, loginUser.getId());
         return taskId;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String createArticleTaskWithQuotaCheck(String topic, User loginUser) {
+        // 在同一事务中：先扣配额，再创建任务
+        // 如果任务创建失败，配额会自动回滚
+        quotaService.checkAndConsumeQuota(loginUser);
+        return createArticleTask(topic, loginUser);
     }
 
     @Override
@@ -224,9 +238,9 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
     public List<ArticleState.OutlineSection> aiModifyOutline(String taskId, String modifySuggestion, User loginUser) {
         Article article = getByTaskId(taskId);
         ThrowUtils.throwIf(article == null, ErrorCode.NOT_FOUND_ERROR, "文章不存在");
-
-        // 校验权限
-        checkArticlePermission(article, loginUser);
+        // 校验 VIP 权限（普通用户不能使用 AI 修改大纲）
+        ThrowUtils.throwIf(!isVipOrAdmin(loginUser), ErrorCode.NO_AUTH_ERROR,
+                "AI 修改大纲功能仅限 VIP 会员使用");
 
         // 校验当前阶段（必须是 OUTLINE_EDITING）
         ArticlePhaseEnum currentPhase = ArticlePhaseEnum.getByValue(article.getPhase());
@@ -281,6 +295,15 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
         articleVOPage.setRecords(articleVOList);
 
         return articleVOPage;
+    }
+
+
+    /**
+     * 判断是否为 VIP 或管理员
+     */
+    private boolean isVipOrAdmin(User user) {
+        return ADMIN_ROLE.equals(user.getUserRole()) ||
+                VIP_ROLE.equals(user.getUserRole());
     }
     //endregion
 

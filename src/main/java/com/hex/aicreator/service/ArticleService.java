@@ -26,16 +26,16 @@ public interface ArticleService extends IService<Article> {
      * @return 任务ID
      */
     String createArticleTask(String topic, User loginUser);
-//
-//    /**
-//     * 创建文章任务（带配额检查）
-//     * 将配额扣减和任务创建放在同一事务中，确保原子性
-//     *
-//     * @param topic     选题
-//     * @param loginUser 当前登录用户
-//     * @return 任务ID
-//     */
-//    String createArticleTaskWithQuotaCheck(String topic, User loginUser);
+
+    /**
+     * 创建文章任务（带配额检查）
+     * 将配额扣减和任务创建放在同一事务中，确保原子性
+     *
+     * @param topic     选题
+     * @param loginUser 当前登录用户
+     * @return 任务ID
+     */
+    String createArticleTaskWithQuotaCheck(String topic, User loginUser);
 
     /**
      * 根据任务ID获取文章成品

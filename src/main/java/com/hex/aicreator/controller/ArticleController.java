@@ -53,7 +53,8 @@ public class ArticleController {
      */
     @PostMapping("/create")
     @Operation(summary = "创建文章任务")
-    public BaseResponse<String> createArticle(@RequestBody ArticleCreateRequest request, HttpServletRequest httpServletRequest) {
+    public BaseResponse<String> createArticle(@RequestBody ArticleCreateRequest request,
+                                              HttpServletRequest httpServletRequest) {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
         ThrowUtils.throwIf(request.getTopic() == null || request.getTopic().trim().isEmpty(),
                 ErrorCode.PARAMS_ERROR, "选题不能为空");
@@ -61,11 +62,9 @@ public class ArticleController {
         User loginUser = userService.getLoginUser(httpServletRequest);
 
         // 检查并消耗配额 + 创建文章任务（在同一事务中）
-        String taskId = articleService.createArticleTask(
+        String taskId = articleService.createArticleTaskWithQuotaCheck(
                 request.getTopic(),
-                loginUser
-        );
-
+                loginUser);
         // 异步执行阶段1：生成标题方案
         articleAsyncService.workFLow_Phase1(
                 taskId,

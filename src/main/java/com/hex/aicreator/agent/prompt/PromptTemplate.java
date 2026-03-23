@@ -155,8 +155,8 @@ public interface PromptTemplate {
      * AI 修改大纲 Prompt
      */
     String AI_MODIFY_OUTLINE_PROMPT = """
-            你是一位专业的文章策划师,擅长根据用户反馈优化文章结构。
-            
+            你是一位专业的新媒体编辑，擅长根据用户反馈优化文章结构。
+      
             当前文章信息：
             主标题：{mainTitle}
             副标题：{subTitle}

@@ -61,15 +61,15 @@ public class User implements Serializable {
      */
     private String userRole;
 
-//    /**
-//     * 剩余配额
-//     */
-//    private Integer quota;
-//
-//    /**
-//     * 成为会员时间
-//     */
-//    private LocalDateTime vipTime;
+    /**
+     * 剩余配额
+     */
+    private Integer quota;
+
+    /**
+     * 成为会员时间
+     */
+    private LocalDateTime vipTime;
 
     /**
      * 编辑时间
