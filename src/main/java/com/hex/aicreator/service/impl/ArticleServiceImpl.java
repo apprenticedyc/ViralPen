@@ -87,7 +87,7 @@ public class ArticleServiceImpl extends ServiceImpl<ArticleMapper, Article> impl
     }
 
     @Override
-    public void saveArticleContent(String taskId, ArticleState state) {
+    public void saveFullContent(String taskId, ArticleState state) {
         Article article = getByTaskId(taskId);
 
         if (article == null) {

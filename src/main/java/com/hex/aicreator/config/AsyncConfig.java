@@ -11,7 +11,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Configuration
 @EnableAsync
 public class AsyncConfig {
-
     /**
      * 文章生成异步线程池
      */

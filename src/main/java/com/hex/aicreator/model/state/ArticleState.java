@@ -87,6 +87,7 @@ public class ArticleState implements Serializable {
     /**
      * 标题结果
      */
+    @Builder
     @Data
     public static class TitleResult implements Serializable {
         private String mainTitle;
@@ -137,6 +138,7 @@ public class ArticleState implements Serializable {
     /**
      * 配图结果
      */
+    @Builder
     @Data
     public static class ImageResult implements Serializable {
         private Integer position;

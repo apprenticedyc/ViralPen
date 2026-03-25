@@ -32,4 +32,12 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+# 文章智能体配置
+article:
+  agent:
+    # true: 使用StateGraph
+    # false: 使用原有的ArticleAgentService
+    useGraph: true
+    # Agent 最大迭代次数
+    max-iterations: 10
 

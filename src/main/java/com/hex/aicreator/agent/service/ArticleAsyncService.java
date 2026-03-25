@@ -1,6 +1,8 @@
 package com.hex.aicreator.agent.service;
 
 import com.google.gson.reflect.TypeToken;
+import com.hex.aicreator.agent.ArticleGraph;
+import com.hex.aicreator.config.AgentConfig;
 import com.hex.aicreator.model.entity.Article;
 import com.hex.aicreator.model.enums.ArticlePhaseEnum;
 import com.hex.aicreator.model.enums.SseMessageTypeEnum;
@@ -31,6 +33,13 @@ public class ArticleAsyncService {
     @Resource
     private ArticleService articleService;
 
+    @Resource
+    private ArticleGraph articleGraph;
+
+    @Resource
+    private AgentConfig agentConfig;
+
+
     /**
      * 阶段1：异步生成标题方案
      *
@@ -48,10 +57,16 @@ public class ArticleAsyncService {
 
             // 创建状态对象
             ArticleState state = ArticleState.builder().taskId(taskId).topic(topic).build();
-            // 执行阶段1：生成标题方案
-            articleAgentService.executePhase1(state, message -> {
-                handleAgentMessage(taskId, message, state);
-            });
+            // 执行阶段1：生成标题方案 (根据开关选择执行逻辑)
+            if (agentConfig.isUseGraph()) {
+                articleGraph.executePhase1(state, message -> {
+                    handleAgentMessage(taskId, message, state);
+                });
+            } else {
+                articleAgentService.executePhase1(state, message -> {
+                    handleAgentMessage(taskId, message, state);
+                });
+            }
             // 保存标题方案到数据库
             articleService.saveTitleOptions(taskId, state.getTitleOptions());
             // 更新阶段为等待选择标题
@@ -93,15 +108,20 @@ public class ArticleAsyncService {
                     .build();
 
             // 设置标题
-            ArticleState.TitleResult title = new ArticleState.TitleResult();
-            title.setMainTitle(article.getMainTitle());
-            title.setSubTitle(article.getSubTitle());
+            ArticleState.TitleResult title = ArticleState.TitleResult.builder().mainTitle(article.getMainTitle())
+                    .subTitle(article.getSubTitle()).build();
             state.setTitle(title);
 
-            // 执行阶段2：生成大纲
-            articleAgentService.executePhase2(state, message -> {
-                handleAgentMessage(taskId, message, state);
-            });
+            // 执行阶段2：生成大纲(根据开关选择执行逻辑)
+            if (agentConfig.isUseGraph()) {
+                articleGraph.executePhase2(state, message -> {
+                    handleAgentMessage(taskId, message, state);
+                });
+            } else {
+                articleAgentService.executePhase2(state, message -> {
+                    handleAgentMessage(taskId, message, state);
+                });
+            }
 
             // 保存大纲到数据库
             Article articleToUpdate = articleService.getByTaskId(taskId);
@@ -153,9 +173,10 @@ public class ArticleAsyncService {
             state.setEnabledImageMethods(enabledMethods);
 
             // 设置标题
-            ArticleState.TitleResult title = new ArticleState.TitleResult();
-            title.setMainTitle(article.getMainTitle());
-            title.setSubTitle(article.getSubTitle());
+            ArticleState.TitleResult title = ArticleState.TitleResult.builder()
+                    .mainTitle(article.getMainTitle())
+                    .subTitle(article.getSubTitle())
+                    .build();
             state.setTitle(title);
 
             // 设置大纲
@@ -166,12 +187,18 @@ public class ArticleAsyncService {
             state.setOutline(outlineResult);
 
             // 执行阶段3：生成正文+配图
-            articleAgentService.executePhase3(state, message -> {
-                handleAgentMessage(taskId, message, state);
-            });
+            if (agentConfig.isUseGraph()) {
+                articleGraph.executePhase3(state, message -> {
+                    handleAgentMessage(taskId, message, state);
+                });
+            } else {
+                articleAgentService.executePhase3(state, message -> {
+                    handleAgentMessage(taskId, message, state);
+                });
+            }
 
             // 保存完整文章到数据库
-            articleService.saveArticleContent(taskId, state);
+            articleService.saveFullContent(taskId, state);
 
             // 更新状态为已完成
             articleService.updateArticleStatus(taskId, ArticleTaskStatusEnum.COMPLETED, null);

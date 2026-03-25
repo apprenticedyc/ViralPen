@@ -87,7 +87,7 @@ public interface ArticleService extends IService<Article> {
      * @param taskId 任务ID
      * @param state  文章状态对象
      */
-    void saveArticleContent(String taskId, ArticleState state);
+    void saveFullContent(String taskId, ArticleState state);
 
     /**
      * 确认标题（用户选择后）

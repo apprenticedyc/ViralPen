@@ -47,14 +47,14 @@ public class ArticleAgentService {
      * 阶段1：生成标题方案（3-5个）
      *
      * @param state         文章状态
-     * @param streamHandler 流式输出处理器
+     * @param messageHandler 流式消息处理器
      */
-    public void executePhase1(ArticleState state, Consumer<String> streamHandler) {
+    public void executePhase1(ArticleState state, Consumer<String> messageHandler) {
         try {
             // 智能体1：生成标题方案
             log.info("阶段1：开始生成标题方案, taskId={}", state.getTaskId());
             agent1GenerateTitleOptions(state);
-            streamHandler.accept(SseMessageTypeEnum.AGENT1_COMPLETE.getValue());
+            messageHandler.accept(SseMessageTypeEnum.AGENT1_COMPLETE.getValue());
             log.info("阶段1：标题方案生成完成, taskId={}, optionsCount={}", state.getTaskId(), state.getTitleOptions()
                     .size());
         } catch (Exception e) {
@@ -67,14 +67,14 @@ public class ArticleAgentService {
      * 阶段2：生成大纲（用户选择标题后）
      *
      * @param state         文章状态
-     * @param streamHandler 流式输出处理器
+     * @param messageHandler 流式输出处理器
      */
-    public void executePhase2(ArticleState state, Consumer<String> streamHandler) {
+    public void executePhase2(ArticleState state, Consumer<String> messageHandler) {
         try {
             // 智能体2：生成大纲（流式输出）
             log.info("阶段2：开始生成大纲, taskId={}", state.getTaskId());
-            agent2GenerateOutline(state, streamHandler);
-            streamHandler.accept(SseMessageTypeEnum.AGENT2_COMPLETE.getValue());
+            agent2GenerateOutline(state, messageHandler);
+            messageHandler.accept(SseMessageTypeEnum.AGENT2_COMPLETE.getValue());
             log.info("阶段2：大纲生成完成, taskId={}", state.getTaskId());
         } catch (Exception e) {
             log.error("阶段2：大纲生成失败, taskId={}", state.getTaskId(), e);
@@ -86,29 +86,29 @@ public class ArticleAgentService {
      * 阶段3：生成正文+配图（用户确认大纲后）
      *
      * @param state         文章状态
-     * @param streamHandler 流式输出处理器
+     * @param messageHandler 流式输出处理器
      */
-    public void executePhase3(ArticleState state, Consumer<String> streamHandler) {
+    public void executePhase3(ArticleState state, Consumer<String> messageHandler) {
         try {
             // 智能体3：生成正文（流式输出）
             log.info("阶段3：开始生成正文, taskId={}", state.getTaskId());
-            agent3GenerateContent(state, streamHandler);
-            streamHandler.accept(SseMessageTypeEnum.AGENT3_COMPLETE.getValue());
+            agent3GenerateContent(state, messageHandler);
+            messageHandler.accept(SseMessageTypeEnum.AGENT3_COMPLETE.getValue());
 
             // 智能体4：分析配图需求
             log.info("阶段3：开始分析配图需求, taskId={}", state.getTaskId());
             agent4AnalyzeImageRequirements(state);
-            streamHandler.accept(SseMessageTypeEnum.AGENT4_COMPLETE.getValue());
+            messageHandler.accept(SseMessageTypeEnum.AGENT4_COMPLETE.getValue());
 
             // 智能体5：生成配图
             log.info("阶段3：开始生成配图, taskId={}", state.getTaskId());
-            agent5GenerateImages(state, streamHandler);
-            streamHandler.accept(SseMessageTypeEnum.AGENT5_COMPLETE.getValue());
+            agent5GenerateImages(state, messageHandler);
+            messageHandler.accept(SseMessageTypeEnum.AGENT5_COMPLETE.getValue());
 
             // 图文合成：将配图插入正文
             log.info("阶段3：开始图文合成, taskId={}", state.getTaskId());
             mergeImagesIntoContent(state);
-            streamHandler.accept(SseMessageTypeEnum.MERGE_COMPLETE.getValue());
+            messageHandler.accept(SseMessageTypeEnum.MERGE_COMPLETE.getValue());
 
             log.info("阶段3：正文生成完成, taskId={}", state.getTaskId());
         } catch (Exception e) {
@@ -135,7 +135,7 @@ public class ArticleAgentService {
     /**
      * 智能体2：生成大纲（流式输出）
      */
-    private void agent2GenerateOutline(ArticleState state, Consumer<String> streamHandler) {
+    private void agent2GenerateOutline(ArticleState state, Consumer<String> messageHandler) {
         // 1. 构建用户补充描述的 prompt 部分（如果有的话）
         String userDescriptionPrompt = state.getUserDescription() == null ? "" : PromptTemplate.USER_DESCRIPTION_POMPT.replace("{userDescription}", state.getUserDescription());
 
@@ -143,7 +143,7 @@ public class ArticleAgentService {
         String prompt = PromptTemplate.AGENT2_OUTLINE_PROMPT.replace("{mainTitle}", state.getTitle().getMainTitle())
                 .replace("{subTitle}", state.getTitle().getSubTitle())
                 .replace("{USER_DESCRIPTION_PROMPT}", userDescriptionPrompt);
-        String content = stream(prompt, streamHandler, SseMessageTypeEnum.AGENT2_STREAMING, ArticleState.OutlineResult.class);
+        String content = stream(prompt, messageHandler, SseMessageTypeEnum.AGENT2_STREAMING, ArticleState.OutlineResult.class);
         ArticleState.OutlineResult outlineResult = parseJsonResponse(content, ArticleState.OutlineResult.class, "大纲");
         state.setOutline(outlineResult);
         log.info("智能体2：大纲生成成功, sections={}", outlineResult.getSections().size());
@@ -153,12 +153,12 @@ public class ArticleAgentService {
     /**
      * 智能体3：生成正文（流式输出）
      */
-    private void agent3GenerateContent(ArticleState state, Consumer<String> streamHandler) {
+    private void agent3GenerateContent(ArticleState state, Consumer<String> messageHandler) {
         String outlineText = GsonUtils.toJson(state.getOutline().getSections());
         String prompt = PromptTemplate.AGENT3_CONTENT_PROMPT.replace("{mainTitle}", state.getTitle().getMainTitle())
                 .replace("{subTitle}", state.getTitle().getSubTitle()).replace("{outline}", outlineText);
 
-        String content = stream(prompt, streamHandler, SseMessageTypeEnum.AGENT3_STREAMING, String.class);
+        String content = stream(prompt, messageHandler, SseMessageTypeEnum.AGENT3_STREAMING, String.class);
         state.setContent(content);
         log.info("智能体3：正文生成成功, length={}", content.length());
     }
@@ -183,7 +183,7 @@ public class ArticleAgentService {
     /**
      * 智能体5：生成配图（串行执行，支持混用多种配图方式，统一上传到 COS）
      */
-    private void agent5GenerateImages(ArticleState state, Consumer<String> streamHandler) {
+    private void agent5GenerateImages(ArticleState state, Consumer<String> messageHandler) {
         List<ArticleState.ImageResult> imageResults = new ArrayList<>();
 
         for (ArticleState.ImageRequirement requirement : state.getImageRequirements()) {
@@ -206,7 +206,7 @@ public class ArticleAgentService {
 
             // 推送单张配图完成
             String imageCompleteMessage = SseMessageTypeEnum.IMAGE_COMPLETE.getStreamingPrefix() + GsonUtils.toJson(imageResult);
-            streamHandler.accept(imageCompleteMessage);
+            messageHandler.accept(imageCompleteMessage);
 
             log.info("智能体5：配图获取并上传成功, position={}, method={}, cosUrl={}", requirement.getPosition(), method.getValue(), cosUrl);
         }
@@ -267,7 +267,7 @@ public class ArticleAgentService {
     /**
      * 调用 LLM（流式输出）
      */
-    private String stream(String prompt, Consumer<String> streamHandler, SseMessageTypeEnum messageType, Class clz) {
+    private String stream(String prompt, Consumer<String> messageHandler, SseMessageTypeEnum messageType, Class clz) {
         DashScopeChatOptions options = DashScopeChatOptions.builder().enableThinking(true) // 开启思考
                 .temperature(0.3)  // 更低的温度，更确定的输出
                 .maxToken(5000) // 生成响应最多消耗token数
@@ -286,7 +286,7 @@ public class ArticleAgentService {
             throw new RuntimeException("LLM 调用失败: " + e.getMessage(), e);
         }
         response
-                // 处理响应流中元素, 来一个拼接一个, 并通过streamHandler推送给前端
+                // 处理响应流中元素, 来一个拼接一个, 并通过messageHandler推送给前端
                 .doOnNext(output -> {
                     if (output instanceof StreamingOutput streamingOutput) {
                         OutputType type = streamingOutput.getOutputType();
@@ -295,7 +295,7 @@ public class ArticleAgentService {
                             String text = streamingOutput.message().getText();
                             contentBuilder.append(text);
                             // 实时推送进度
-                            streamHandler.accept(messageType.getStreamingPrefix() + text);
+                            messageHandler.accept(messageType.getStreamingPrefix() + text);
                         } else if (type == OutputType.AGENT_MODEL_FINISHED) {
                             log.info("\n模型流式输出完成");
                         }
@@ -364,30 +364,16 @@ public class ArticleAgentService {
      */
     private ArticleState.ImageResult buildImageResult(ArticleState.ImageRequirement requirement, String imageUrl,
                                                       ImageMethodEnum method) {
-        ArticleState.ImageResult imageResult = new ArticleState.ImageResult();
-        imageResult.setPosition(requirement.getPosition());
-        imageResult.setUrl(imageUrl);
-        imageResult.setMethod(method.getValue());
-        imageResult.setKeywords(requirement.getKeywords());
-        imageResult.setSectionTitle(requirement.getSectionTitle());
-        imageResult.setDescription(requirement.getType());
-        imageResult.setPlaceholderId(requirement.getPlaceholderId());  // 记录占位符ID
+        ArticleState.ImageResult imageResult = ArticleState.ImageResult.builder()
+                .position(requirement.getPosition())
+                .url(imageUrl)
+                .method(method.getValue())
+                .keywords(requirement.getKeywords())
+                .sectionTitle(requirement.getSectionTitle())
+                .description(requirement.getType())
+                .placeholderId(requirement.getPlaceholderId())
+                .build();
         return imageResult;
-    }
-
-    /**
-     * 在章节标题后插入对应图片
-     */
-    private void insertImageAfterSection(StringBuilder fullContent, List<ArticleState.ImageResult> images,
-                                         String sectionTitle) {
-        for (ArticleState.ImageResult image : images) {
-            if (image.getPosition() > 1 && image.getSectionTitle() != null && sectionTitle.contains(image.getSectionTitle()
-                    .trim())) {
-                fullContent.append("\n![").append(image.getDescription()).append("](").append(image.getUrl())
-                        .append(")\n");
-                break;
-            }
-        }
     }
     // endregion
 }
